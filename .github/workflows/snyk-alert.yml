@@ -1,0 +1,72 @@
+name: Snyk Security Scan + Email Alert
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  snyk-scan-alert:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r src/gateway/requirements.txt --ignore-requires-python || true
+          pip install wrapt --upgrade || true
+
+      - name: Install Snyk CLI
+        run: npm install -g snyk
+
+      - name: Snyk SCA Scan
+        run: |
+          snyk test \
+            --file=src/gateway/requirements.txt \
+            --package-manager=pip \
+            --skip-unresolved \
+            --json > snyk-sca.json || true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: Show scan logs
+        run: |
+          echo "========== SNYK SCAN RESULTS =========="
+          python3 -c "
+          import json
+          d = json.load(open('snyk-sca.json'))
+          vulns = d.get('vulnerabilities', [])
+          critical = [v for v in vulns if v.get('severity') == 'critical']
+          high = [v for v in vulns if v.get('severity') == 'high']
+          print(f'Total vulnerabilities : {len(vulns)}')
+          print(f'Critical              : {len(critical)}')
+          print(f'High                  : {len(high)}')
+          print()
+          print('Top Critical/High findings:')
+          for v in (critical + high)[:8]:
+              print(f'  [{v[\"severity\"].upper()}] {v[\"packageName\"]}@{v[\"version\"]} — {v[\"title\"]}')
+          "
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: snyk-security-report
+          path: snyk-sca.json
+
+      - name: Send email alert
+        if: always()
+        run: python3 scripts/send_alert.py
+        env:
+          ALERT_EMAIL_FROM  : ${{ secrets.ALERT_EMAIL_FROM }}
+          ALERT_EMAIL_TO    : ${{ secrets.ALERT_EMAIL_TO }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          GITHUB_REPOSITORY : ${{ github.repository }}
+          GITHUB_REF_NAME   : ${{ github.ref_name }}
+          GITHUB_SHA        : ${{ github.sha }}
+          GITHUB_RUN_ID     : ${{ github.run_id }}
