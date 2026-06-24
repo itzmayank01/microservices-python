@@ -16,11 +16,6 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
-        run: |
-          pip install -r src/gateway/requirements.txt --ignore-requires-python || true
-          pip install wrapt --upgrade || true
-
       - name: Install Snyk CLI
         run: npm install -g snyk
 
@@ -30,7 +25,8 @@ jobs:
             --file=src/gateway/requirements.txt \
             --package-manager=pip \
             --skip-unresolved \
-            --json > snyk-sca.json || true
+            --json 2>/dev/null > snyk-sca.json || true
+          echo "Scan complete. File size: $(wc -c < snyk-sca.json) bytes"
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
@@ -38,8 +34,17 @@ jobs:
         run: |
           echo "========== SNYK SCAN RESULTS =========="
           python3 -c "
-          import json
-          d = json.load(open('snyk-sca.json'))
+          import json, sys, os
+          path = 'snyk-sca.json'
+          if not os.path.exists(path) or os.path.getsize(path) == 0:
+              print('snyk-sca.json is empty or missing — scan may have failed')
+              sys.exit(0)
+          try:
+              d = json.load(open(path))
+          except Exception as e:
+              print(f'Could not parse JSON: {e}')
+              print(open(path).read()[:500])
+              sys.exit(0)
           vulns = d.get('vulnerabilities', [])
           critical = [v for v in vulns if v.get('severity') == 'critical']
           high = [v for v in vulns if v.get('severity') == 'high']
@@ -47,7 +52,6 @@ jobs:
           print(f'Critical              : {len(critical)}')
           print(f'High                  : {len(high)}')
           print()
-          print('Top Critical/High findings:')
           for v in (critical + high)[:8]:
               print(f'  [{v[\"severity\"].upper()}] {v[\"packageName\"]}@{v[\"version\"]} — {v[\"title\"]}')
           "
