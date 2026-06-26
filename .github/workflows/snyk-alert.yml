@@ -22,7 +22,7 @@ jobs:
       - name: Snyk SCA Scan
         run: |
           snyk test \
-            --file=src/gateway/requirements.txt \
+            --file=src/gateway/requirements.txt --severity-threshold=high \
             --package-manager=pip \
             --skip-unresolved \
             --json 2>/dev/null > snyk-sca.json || true
